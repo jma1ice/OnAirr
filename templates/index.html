@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>OnAirr</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Now Playing</h1>
+                <p>Currently streaming on Plex</p>
+                <div class="status-indicator" id="statusIndicator">
+                    <div class="status-dot"></div>
+                    <span id="statusText">Connecting...</span>
+                </div>
+            </div>
+
+            <div class="sessions-container" id="sessionsContainer">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                </div>
+            </div>
+
+            <div class="footer">
+                <p>Last updated: <span id="lastUpdated">—</span></p>
+            </div>
+        </div>
+
+        <script>
+            let updateInterval;
+            let animationDelay = 0;
+            let currentSessions = new Map();
+            let sessionContainer;
+            let currentSessionsData = [];
+
+            async function fetchSessions() {
+                try {
+                    const response = await fetch('/api/sessions');
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+
+                    updateStatusIndicator(true, `${data.count} active session${data.count !== 1 ? 's' : ''}`);
+                    renderSessions(data.sessions);
+                    updateLastUpdated(data.last_updated);
+                    
+                } catch (error) {
+                    console.error('Error fetching sessions:', error);
+                    updateStatusIndicator(false, 'Connection error');
+                    renderError(error.message);
+                }
+            }
+
+            function updateStatusIndicator(isConnected, text) {
+                const indicator = document.getElementById('statusIndicator');
+                const statusText = document.getElementById('statusText');
+                const dot = indicator.querySelector('.status-dot');
+                
+                statusText.textContent = text;
+                
+                if (isConnected) {
+                    dot.style.background = 'var(--success)';
+                    indicator.style.background = 'var(--progress-bg)';
+                } else {
+                    dot.style.background = '#cc0000';
+                    indicator.style.background = '#fff5f5';
+                }
+            }
+
+            function renderSessions(sessions) {
+                currentSessionsData = sessions;
+
+                const loadingDiv = sessionContainer.querySelector('.loading');
+                if (loadingDiv) {
+                    loadingDiv.remove();
+                }
+
+                const newSessions = new Map();
+                
+                sessions.forEach(session => {
+                    const key = session.sessionKey || `${session.title}`.replace(/\s+/g, '-');
+                    newSessions.set(key, session);
+                });
+
+                if (sessions.length === 0) {
+                    sessionContainer.innerHTML = `
+                        <div class="empty-state">
+                            <h3>Nothing playing</h3>
+                            <p>No active sessions found.<br>Time to queue up something good!</p>
+                        </div>
+                    `;
+                    currentSessions.clear();
+                    return;
+                }
+
+                const emptyState = sessionContainer.querySelector('.empty-state');
+                if (emptyState) emptyState.remove();
+
+                newSessions.forEach((session, key) => {
+                    const existingCard = document.querySelector(`[data-session-key="${key}"]`);
+                    
+                    if (existingCard) {
+                        updateSessionCard(existingCard, session);
+                    } else {
+                        addNewSessionCard(session, key);
+                    }
+                });
+
+                currentSessions.forEach((session, key) => {
+                    if (!newSessions.has(key)) {
+                        const cardToRemove = document.querySelector(`[data-session-key="${key}"]`);
+                        if (cardToRemove) {
+                            cardToRemove.style.animation = 'slideOut 0.3s ease-out forwards';
+                            setTimeout(() => cardToRemove.remove(), 300);
+                        }
+                    }
+                });
+
+                currentSessions = newSessions;
+            }
+
+            function createSessionCard(session, sessionKey = null) {
+                animationDelay += 0.1;
+                
+                const key = sessionKey || session.sessionKey || `${session.title}`.replace(/\s+/g, '-');
+                const typeColor = getTypeColor(session.type);
+                const title = formatTitle(session);
+                const metadata = formatMetadata(session);
+                
+                return `
+                    <div class="session-card clickable-card" data-session-key="${key}" style="animation-delay: ${animationDelay}s">
+                        ${session.thumb ? `
+                            <style>
+                                .session-card[data-session-key="${key}"] {
+                                    background:
+                                        linear-gradient(rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0.75)),
+                                        url('/api/artwork${session.thumb}');
+                                    background-size: cover;
+                                    background-position: center;
+                                    background-repeat: no-repeat;
+                                    position: relative;
+                                }
+                            </style>
+                        ` : ''}
+
+                        <div class="session-header">
+                            <div class="session-title">
+                                <h2>${title}</h2>
+                                <div class="session-meta">${metadata}</div>
+                            </div>
+                            <div class="session-type" style="background-color: ${typeColor}">
+                                ${session.type}
+                            </div>
+                        </div>
+
+                        ${(session.actors?.length > 0 || session.directors?.length > 0) ? `
+                            <div class="cast-crew-container">
+                                ${session.directors?.length > 0 ? `
+                                    <div class="crew-item">
+                                        <div class="crew-label">Director:
+                                            ${session.directors.join(', ')}
+                                        </div>
+                                    </div>
+                                ` : ''}
+                                
+                                ${session.actors?.length > 0 ? `
+                                    <div class="crew-item">
+                                        <div class="crew-label">Cast:
+                                            ${session.actors.map(actor => 
+                                                actor.name
+                                            ).join(', ')}
+                                        </div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            function formatTitle(session) {
+                if (session.type === 'episode') {
+                    return `${session.show_title} <span style="color: var(--secondary-text)">S${session.season}E${session.episode}</span> - ${session.title}`;
+                } else if (session.type === 'track') {
+                    return `${session.title} <span style="color: var(--secondary-text)">by ${session.artist}</span>`;
+                }
+                return session.title;
+            }
+
+            function formatMetadata(session) {
+                if (session.type === 'episode') {
+                    return `${session.year || 'TV Series'}${session.rating ? ` • ${session.rating}` : ''}`;
+                } else if (session.type === 'track') {
+                    return session.album;
+                } else if (session.type === 'movie') {
+                    return `${session.year || 'Movie'}${session.rating ? ` • ${session.rating}` : ''}`;
+                }
+                return session.year || '';
+            }
+
+            function getTypeColor(type) {
+                const colors = {
+                    'movie': '#0066cc',
+                    'episode': '#8e44ad',
+                    'track': '#27ae60',
+                    'clip': '#f39c12',
+                    'photo': '#e74c3c'
+                };
+                return colors[type] || '#0066cc';
+            }
+
+            function renderError(message) {
+                const container = document.getElementById('sessionsContainer');
+                container.innerHTML = `
+                    <div class="error">
+                        <h3>Connection Error</h3>
+                        <p>${message}</p>
+                    </div>
+                `;
+            }
+
+            function updateLastUpdated(timestamp) {
+                const lastUpdatedEl = document.getElementById('lastUpdated');
+                const date = new Date(timestamp);
+                lastUpdatedEl.textContent = date.toLocaleTimeString();
+            }
+
+            function startAutoRefresh() {
+                updateInterval = setInterval(fetchSessions, 15000);
+            }
+
+            function stopAutoRefresh() {
+                if (updateInterval) {
+                    clearInterval(updateInterval);
+                }
+            }
+
+            function addNewSessionCard(session, key) {
+                const cardHTML = createSessionCard(session, key);
+                sessionContainer.insertAdjacentHTML('beforeend', cardHTML);
+            }
+
+            function updateSessionCard(cardElement, session) {
+                const progressFill = cardElement.querySelector('.progress-fill');
+                const progressPercentage = cardElement.querySelector('.progress-percentage');
+                const remainingTime = cardElement.querySelector('[data-detail="remaining"] .detail-value');
+                
+                if (progressFill && session.progress_percent > 0) {
+                    progressFill.style.width = `${session.progress_percent}%`;
+                }
+                
+                if (progressPercentage) {
+                    progressPercentage.textContent = `${session.progress_percent}%`;
+                }
+                
+                if (remainingTime) {
+                    remainingTime.textContent = `${session.remaining_minutes}m`;
+                }
+            }
+
+            async function openInPlex(session) {
+                try {
+                    const isMobile = isMobileDevice();
+
+                    const response = await fetch('/api/open-in-plex', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            type: session.type,
+                            ratingKey: session.ratingKey,
+                            grandparentRatingKey: session.grandparentRatingKey,
+                            parentRatingKey: session.parentRatingKey,
+                            slug: session.slug,
+                            grandparentSlug: session.grandparentSlug,
+                            parentSlug: session.parentSlug,
+                            isMobile: isMobile,
+                            userAgent: navigator.userAgent
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.error) {
+                        console.error('Error generating Plex URL:', data.error);
+                        return;
+                    }
+
+                    if (isMobile && data.platform) {
+                        console.log(data.url);
+                        window.location.href = data.url;
+                    } else {
+                        window.open(data.url, '_blank');
+                    }
+                } catch (error) {
+                    console.error('Error opening in Plex:', error);
+                }
+            }
+
+            function findSessionByKey(searchKey) {
+                return currentSessionsData.find(session => {
+                    const sessionKey = session.sessionKey || `${session.title}`.replace(/\s+/g, '-');
+                    return sessionKey === searchKey;
+                });
+            }
+
+            function isMobileDevice() {
+                return /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2 && /MacIntel/.test(navigator.platform));
+            }
+
+            document.addEventListener('DOMContentLoaded', () => {
+                sessionContainer = document.getElementById('sessionsContainer');
+                if (sessionContainer) {
+                    fetchSessions();
+                    startAutoRefresh();
+                } else {
+                    console.error('Sessions container not found');
+                }
+            });
+
+            window.addEventListener('beforeunload', stopAutoRefresh);
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    stopAutoRefresh();
+                } else {
+                    startAutoRefresh();
+                }
+            });
+            
+            document.addEventListener('click', (event) => {
+                const sessionCard = event.target.closest('.clickable-card');
+                if (sessionCard) {
+                    const sessionKey = sessionCard.dataset.sessionKey;
+                    const sessionData = findSessionByKey(sessionKey);
+                    if (sessionData) {
+                        openInPlex(sessionData);
+                    }
+                }
+            });
+        </script>
+    </body>
+</html>
