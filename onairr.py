@@ -108,6 +108,7 @@ class PlexAPI:
 
 plex_token = os.getenv('PLEX_TOKEN')
 plex_url = os.getenv('PLEX_URL', 'http://localhost:32400')
+links_bool = os.getenv('ENABLE_LINKS')
 
 if not plex_token:
     print("Warning: PLEX_TOKEN not found in environment variables")
@@ -117,7 +118,7 @@ else:
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', links_bool=links_bool)
 
 @app.route('/api/sessions')
 def api_sessions():
@@ -125,12 +126,10 @@ def api_sessions():
         return jsonify({'error': 'Plex API not configured'}), 500
     
     sessions = plex_api.get_sessions()
-    server_info = plex_api.get_server_info()
 
     return jsonify({
         'sessions': sessions,
         'count': len(sessions),
-        'machineIdentifier': server_info,
         'last_updated': datetime.now().isoformat()
     })
 

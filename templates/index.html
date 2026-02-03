@@ -2,6 +2,7 @@
 <html lang="en">
     <head>
         <meta charset="UTF-8">
+        <link rel="icon" type="image/x-icon" href="/static/img/favicon.png">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>OnAirr</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -135,7 +136,7 @@
                 const metadata = formatMetadata(session);
                 
                 return `
-                    <div class="session-card clickable-card" data-session-key="${key}" style="animation-delay: ${animationDelay}s">
+                    <div class="session-card {% if links_bool == 'true' %}clickable-card{% endif %}" data-session-key="${key}" style="animation-delay: ${animationDelay}s">
                         ${session.thumb ? `
                             <style>
                                 .session-card[data-session-key="${key}"] {
